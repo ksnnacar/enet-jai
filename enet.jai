@@ -1,4 +1,6 @@
-#import "POSIX";
+#if OS != .WINDOWS {
+    #import "POSIX";
+}
 
 HOST_ANY :: V6_ANY_ADDR;
 
@@ -1198,16 +1200,16 @@ map_ip4_to_ip6 :: (addr: in_addr) -> in6_addr {
             return xx V6_NO_ADDR; 
         }
     }
+
     result: in6_addr;
-    if OS == .WINDOWS
-    {
-        
-        // result.u.Byte[10] = 0xFF;
-        // result.u.Byte[11] = 0xFF;
-        // result.u.Byte[12] = addr.S_un.S_un_b.s_b1;
-        // result.u.Byte[13] = addr.S_un.S_un_b.s_b2;
-        // result.u.Byte[14] = addr.S_un.S_un_b.s_b3;
-        // result.u.Byte[15] = addr.S_un.S_un_b.s_b4;
+    
+    #if OS == .WINDOWS {
+        result.u.Byte[10] = 0xFF;
+        result.u.Byte[11] = 0xFF;
+        result.u.Byte[12] = addr.S_un.S_un_b.s_b1;
+        result.u.Byte[13] = addr.S_un.S_un_b.s_b2;
+        result.u.Byte[14] = addr.S_un.S_un_b.s_b3;
+        result.u.Byte[15] = addr.S_un.S_un_b.s_b4;
     }else{
         result.__u6_addr.__u6_addr8[10] = 0xFF;
         result.__u6_addr.__u6_addr8[11] = 0xFF;
@@ -1435,7 +1437,7 @@ socket_send :: (socket: Socket, address: *Address, buffers: []Buffer, buffer_cou
             ifx address then cast(s32)size_of(sockaddr_in6) else cast(s32)0,
             null, null) == SOCKET_ERROR {
 
-            #if OS == WINDOWS{
+            #if OS == .WINDOWS{
                 error_no := WSAGetLastError();                
             }   else{
                 error_no := errno();
