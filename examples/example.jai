@@ -94,7 +94,7 @@ run_client :: () {
     address.port = SERVER_PORT;
 
     log("Connecting to server %:%", SERVER_ADDRESS, SERVER_PORT);
-    server := enet.host_connect(client, *address, 1, 5);
+    server := enet.host_connect(client, address, 1, 5);
 
     disconnect_countdown := 10;
 

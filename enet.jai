@@ -1,3 +1,5 @@
+#import "POSIX";
+
 HOST_ANY :: V6_ANY_ADDR;
 
 Event_Type :: enum {
@@ -270,8 +272,14 @@ host_create :: (address: *Address, peer_count: int, channel_limit: int, incoming
     if host.socket != INVALID_SOCKET set_socket_options(host.socket, .IPV6_V6ONLY, 0);
 
     if host.socket == INVALID_SOCKET || (socket_bind(host.socket, address) < 0 && address != null) {
-        log_error("Failed to create and bind socket: %\n", WSAGetLastError());
-
+        #if OS == .WINDOWS{
+            log_error("Failed to create and bind socket: %\n", WSAGetLastError());      
+        }else{
+            //error_no := errno();
+            //if error_no == EWOULDBLOCK return cast(s32)0, error_no;
+            log_error("Failed to create and bind socket: %\n", "err");      
+        }
+        
         socket_destroy(host.socket);
         array_reset(*host.peers);
         free(host);
@@ -870,7 +878,14 @@ Result_Status :: enum {
     FAILURE;
 }
 
-Socket :: #type SOCKET;
+#if OS == .WINDOWS {
+    Socket :: SOCKET;
+    WINSOCK_VERSION: u16 : 0x0202;
+} else {
+    Socket :: s32;
+    INVALID_SOCKET: Socket : -1;
+    SOCKET_ERROR :: -1;
+}
 
 Socket_Options :: enum {
     NONEBLOCK;
@@ -1169,29 +1184,59 @@ lookup_host :: (name: string, no_dns: bool) -> Address, bool {
 
 map_ip4_to_ip6 :: (addr: in_addr) -> in6_addr {
 
-    if addr.S_un.S_addr == 0x00000000 {
-        return xx V6_ANY_ADDR;
-    } else if addr.S_un.S_addr == 0xFFFFFFFF {
-        return xx V6_NO_ADDR; 
+    #if OS == .WINDOWS{
+        if addr.S_un.S_addr == 0x00000000 {
+            return xx V6_ANY_ADDR;
+        } else if addr.S_un.S_addr == 0xFFFFFFFF {
+            return xx V6_NO_ADDR; 
+        }
     }
-
+    else{
+        if addr.s_addr == 0x00000000 {
+            return xx V6_ANY_ADDR;
+        } else if addr.s_addr == 0xFFFFFFFF {
+            return xx V6_NO_ADDR; 
+        }
+    }
     result: in6_addr;
-    result.u.Byte[10] = 0xFF;
-    result.u.Byte[11] = 0xFF;
-    result.u.Byte[12] = addr.S_un.S_un_b.s_b1;
-    result.u.Byte[13] = addr.S_un.S_un_b.s_b2;
-    result.u.Byte[14] = addr.S_un.S_un_b.s_b3;
-    result.u.Byte[15] = addr.S_un.S_un_b.s_b4;
+    if OS == .WINDOWS
+    {
+        
+        // result.u.Byte[10] = 0xFF;
+        // result.u.Byte[11] = 0xFF;
+        // result.u.Byte[12] = addr.S_un.S_un_b.s_b1;
+        // result.u.Byte[13] = addr.S_un.S_un_b.s_b2;
+        // result.u.Byte[14] = addr.S_un.S_un_b.s_b3;
+        // result.u.Byte[15] = addr.S_un.S_un_b.s_b4;
+    }else{
+        result.__u6_addr.__u6_addr8[10] = 0xFF;
+        result.__u6_addr.__u6_addr8[11] = 0xFF;
+        result.__u6_addr.__u6_addr8[12] = cast(u8) (addr.s_addr >> 0) & 0xff;
+        result.__u6_addr.__u6_addr8[13] = cast(u8) (addr.s_addr >> 8) & 0xff;
+        result.__u6_addr.__u6_addr8[14] = cast(u8) (addr.s_addr >> 0) & 0xff;
+        result.__u6_addr.__u6_addr8[15] = cast(u8) (addr.s_addr >> 0) & 0xff;
+    }
 
     return result;
 }
 
 map_ip6_to_ip4 :: (addr: in6_addr) -> in_addr {
     result: in_addr;
-    result.S_un.S_un_b.s_b1 = addr.u.Byte[12];
-    result.S_un.S_un_b.s_b2 = addr.u.Byte[13];
-    result.S_un.S_un_b.s_b3 = addr.u.Byte[14];
-    result.S_un.S_un_b.s_b4 = addr.u.Byte[15];
+    
+    #if OS == .WINDOWS {
+        //server_address.sin_addr.S_un.S_addr = htonl(address);
+        result.S_un.S_un_b.s_b1 = addr.u.Byte[12];
+        result.S_un.S_un_b.s_b2 = addr.u.Byte[13];
+        result.S_un.S_un_b.s_b3 = addr.u.Byte[14];
+        result.S_un.S_un_b.s_b4 = addr.u.Byte[15];
+    } else {
+        result.sin_addr.s_b1= addr.u.Byte[12];
+        result.sin_addr.s_b2 = addr.u.Byte[13];
+        result.sin_addr.s_b3= addr.u.Byte[14];
+        result.sin_addr.s_b4 = addr.u.Byte[15];
+        //server_address.sin_addr.s_addr = htonl(address);
+    }
+
 
     return result;
 }
@@ -1238,10 +1283,24 @@ socket_create :: () -> Socket {
 socket_destroy :: (socket: Socket) {
     #if OS == .WINDOWS {
         closesocket(socket);
-    } else #if OS == .UNIX {
+    } else #if OS == .LINUX {
         close(socket);
     }
 }
+    // #if OS == .WINDOWS {
+    //     mode: u32;
+    //     if !blocking mode = 1;
+    //     result := ioctlsocket(s, FIONBIO, *mode);
+    // } else {
+    //     value := fcntl(s, F_GETFL);
+    //     if blocking {
+    //         value &= xx ~O_NONBLOCK;
+    //     } else {
+    //         value |= xx O_NONBLOCK;
+    //     }
+
+    //     result := fcntl(s, F_SETFL, value);
+    // }
 
 set_socket_options :: (socket: Socket, options: Socket_Options, value: s32) -> bool {
     result: int;
@@ -1289,8 +1348,9 @@ socket_bind :: (socket: Socket, address: *Address) -> int {
 get_socket_address :: (socket: Socket, address: *Address) -> bool {
     sin:     sockaddr_in6;
     sin_len :s32= xx size_of(sockaddr_in6);
-
-    if getsockname(socket, cast(*sockaddr)*sin, *sin_len) == -1 return false;
+//getsockname :: (s: SOCKET, name: *sockaddr, namelen: *s32) -> s32 #foreign ws2_32;
+// getsockname :: (unknown0: s32, unknown1: *sockaddr, unknown2: *socklen_t) -> s32 #foreign libc;
+    if getsockname(socket, cast(*sockaddr)*sin,xx *sin_len) == -1 return false;
 
     address.host = sin.sin6_addr;
     address.port = htons(sin.sin6_port);
@@ -1322,7 +1382,7 @@ socket_wait :: (socket: Socket, condition: *Socket_Wait, timeout: s64) -> Result
         if FD_ISSET(socket, *write_set) then condition.* |= .SEND;
         if FD_ISSET(socket, *read_set) then condition.* |= .RECEIVE;
 
-    } else #if OS == .UNIX {
+    } else #if OS == .LINUX {
         poll_socket: pollfd;
         poll_count:  int;
 
@@ -1375,10 +1435,15 @@ socket_send :: (socket: Socket, address: *Address, buffers: []Buffer, buffer_cou
             ifx address then cast(s32)size_of(sockaddr_in6) else cast(s32)0,
             null, null) == SOCKET_ERROR {
 
-            error_no := WSAGetLastError();
+            #if OS == WINDOWS{
+                error_no := WSAGetLastError();                
+            }   else{
+                error_no := errno();
+            } 
+
             return ifx error_no == WSAEWOULDBLOCK then cast(s32)0 else cast(s32)-1, error_no;
         }
-    } else #if OS == .UNIX {
+    } else #if OS == .LINUX {
         msg_header: msghdr;
 
         if address != null {
@@ -1443,7 +1508,7 @@ socket_receive :: (socket: Socket, address: *Address, buffers: []Buffer, buffer_
             address.sin6_scope_id  = xx sin.sin6_scope_id;
         }
 
-    } else #if OS == .UNIX {
+    } else #if OS == .LINUX {
         msg_header: msghdr;
         msg_header.msg_name = *sin;
         msg_header.msg_namelen = size_of(sockaddr_in6);
